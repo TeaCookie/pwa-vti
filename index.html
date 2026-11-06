@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#2563eb">
+  <title>Voice Counter</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 1rem;
+      font-family: system-ui, -apple-system, sans-serif;
+      background: #f8fafc; color: #1e293b;
+    }
+    h1 { margin: 0; font-size: 1.5rem; }
+    .counter { font-size: 6rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .controls { display: flex; gap: 0.5rem; flex-wrap: wrap; justify-content: center; }
+    button {
+      padding: 0.75rem 1.5rem; font-size: 1.125rem; border: none; border-radius: 0.5rem;
+      background: #2563eb; color: white; cursor: pointer; transition: background 0.1s;
+    }
+    button:disabled { background: #94a3b8; cursor: not-allowed; }
+    button:not(:disabled):active { background: #1d4ed8; }
+    button.secondary { background: #64748b; }
+    button.secondary:not(:disabled):active { background: #475569; }
+    button.danger { background: #ef4444; }
+    button.danger:not(:disabled):active { background: #dc2626; }
+    .mic-btn {
+      width: 80px; height: 80px; border-radius: 50%; border: none;
+      background: #2563eb; color: white; font-size: 2rem; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      box-shadow: 0 4px 12px rgba(37,99,235,0.4);
+      transition: transform 0.1s, background 0.1s;
+    }
+    .mic-btn:not(:disabled):active { transform: scale(0.95); background: #1d4ed8; }
+    .mic-btn.listening { background: #ef4444; animation: pulse 1s infinite; }
+    @keyframes pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(239,68,68,0.7); } 50% { box-shadow: 0 0 0 16px rgba(239,68,68,0); } }
+    .debug { display: flex; gap: 0.5rem; width: 100%; max-width: 400px; }
+    .debug input { flex: 1; padding: 0.5rem; font-size: 1rem; border: 1px solid #cbd5e1; border-radius: 0.5rem; }
+    .status { font-size: 0.875rem; color: #64748b; min-height: 1.25rem; text-align: center; width: 100%; max-width: 400px; }
+    .raw-output { font-family: monospace; font-size: 0.75rem; color: #94a3b8; white-space: pre-wrap; word-break: break-word; max-width: 400px; text-align: left; }
+    .install-hint { position: fixed; bottom: 1rem; left: 50%; transform: translateX(-50%); background: #1e293b; color: white; padding: 0.75rem 1.5rem; border-radius: 0.5rem; font-size: 0.875rem; opacity: 0; transition: opacity 0.3s; pointer-events: none; }
+    .install-hint.show { opacity: 1; }
+  </style>
+</head>
+<body>
+  <h1>Voice Counter</h1>
+  <div class="counter" id="counter">0</div>
+  <div class="controls">
+    <button id="incrementBtn">+1</button>
+    <button id="decrementBtn" class="secondary">-1</button>
+    <button id="resetBtn" class="danger">Reset</button>
+  </div>
+  <button class="mic-btn" id="micBtn" disabled title="Needle loading…">🎤</button>
+  <div class="debug">
+    <input type="text" id="debugInput" placeholder="Type command (e.g., add three)" disabled>
+    <button id="debugBtn" disabled>Run</button>
+  </div>
+  <div class="status" id="status">Loading Needle…</div>
+  <div class="raw-output" id="rawOutput"></div>
+  <div class="install-hint" id="installHint">Install app for offline use</div>
+
+  <script>
+    // --- Counter state ---
+    let count = parseInt(localStorage.getItem('voice-counter') || '0', 10);
+    const counterEl = document.getElementById('counter');
+    const statusEl = document.getElementById('status');
+    const rawOutputEl = document.getElementById('rawOutput');
+    const micBtn = document.getElementById('micBtn');
+    const debugInput = document.getElementById('debugInput');
+    const debugBtn = document.getElementById('debugBtn');
+    const installHint = document.getElementById('installHint');
+
+    function render() { counterEl.textContent = count; }
+    function save() { localStorage.setItem('voice-counter', String(count)); }
+    function setStatus(msg) { statusEl.textContent = msg; }
+    function setRawOutput(text) { rawOutputEl.textContent = text; }
+
+    // --- Basic button handlers (work without Needle) ---
+    document.getElementById('incrementBtn').onclick = () => { count++; save(); render(); };
+    document.getElementById('decrementBtn').onclick = () => { count--; save(); render(); };
+    document.getElementById('resetBtn').onclick = () => { count = 0; save(); render(); };
+
+    // --- Needle Worker wiring ---
+    const worker = new Worker('needle.worker.js');
+    let workerReady = false;
+    let pendingId = 0;
+    const pending = new Map();
+
+    // Tool schemas for Needle
+    const tools = [
+      { name: 'increment', description: 'Increase counter', parameters: { type: 'object', properties: { amount: { type: 'number', default: 1 } }, required: [] } },
+      { name: 'decrement', description: 'Decrease counter', parameters: { type: 'object', properties: { amount: { type: 'number', default: 1 } }, required: [] } },
+      { name: 'reset', description: 'Reset counter to zero', parameters: { type: 'object', properties: {}, required: [] } }
+    ];
+
+    worker.onmessage = (e) => {
+      const { type, id, output, error, ready } = e.data;
+      if (type === 'ready') {
+        workerReady = true;
+        micBtn.disabled = false;
+        debugInput.disabled = false;
+        debugBtn.disabled = false;
+        micBtn.title = 'Tap to speak';
+        setStatus('Ready — tap mic or type a command');
+        return;
+      }
+      if (type === 'error') { setStatus('Error: ' + error); return; }
+      if (type === 'loaded') {
+        worker.postMessage({ type: 'init', tools });
+        return;
+      }
+      if (type === 'result') {
+        const start = pending.get(id);
+        pending.delete(id);
+        const elapsed = start ? ((performance.now() - start) / 1000).toFixed(2) + 's' : '?';
+        setRawOutput(output);
+        try {
+          const parsed = JSON.parse(output);
+          if (parsed && parsed.name && typeof parsed.arguments === 'object') {
+            handleCommand(parsed.name, parsed.arguments);
+            setStatus(`Executed ${parsed.name} (${elapsed})`);
+          } else {
+            setStatus('No command understood (' + elapsed + ')');
+          }
+        } catch {
+          setStatus('Parse failed (' + elapsed + ')');
+        }
+      }
+    };
+
+    function sendToWorker(text) {
+      const id = ++pendingId;
+      pending.set(id, performance.now());
+      worker.postMessage({ type: 'complete', text, id });
+      setStatus('Processing…');
+    }
+
+    function handleCommand(name, args) {
+      const amount = typeof args.amount === 'number' ? args.amount : 1;
+      switch (name) {
+        case 'increment': count += amount; break;
+        case 'decrement': count -= amount; break;
+        case 'reset': count = 0; break;
+      }
+      save(); render();
+    }
+
+    // --- Debug typed input ---
+    debugBtn.onclick = () => {
+      const text = debugInput.value.trim();
+      if (text) { sendToWorker(text); debugInput.value = ''; }
+    };
+    debugInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') debugBtn.click(); });
+
+    // --- Speech Recognition ---
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    let recognition = null;
+    if (SpeechRecognition) {
+      recognition = new SpeechRecognition();
+      recognition.lang = 'en-US';
+      recognition.interimResults = false;
+      recognition.maxAlternatives = 1;
+
+      recognition.onresult = (e) => {
+        const transcript = e.results[0][0].transcript;
+        micBtn.classList.remove('listening');
+        micBtn.textContent = '🎤';
+        sendToWorker(transcript);
+      };
+      recognition.onerror = (e) => {
+        micBtn.classList.remove('listening');
+        micBtn.textContent = '🎤';
+        setStatus('Speech error: ' + e.error);
+      };
+      recognition.onend = () => {
+        micBtn.classList.remove('listening');
+        micBtn.textContent = '🎤';
+      };
+    } else {
+      setStatus('Speech Recognition not supported');
+    }
+
+    micBtn.onclick = () => {
+      if (!workerReady) return;
+      if (recognition) {
+        micBtn.classList.add('listening');
+        micBtn.textContent = '⏺';
+        recognition.start();
+      }
+    };
+
+    // --- Install prompt ---
+    let deferredPrompt;
+    window.addEventListener('beforeinstallprompt', (e) => {
+      e.preventDefault(); deferredPrompt = e; installHint.classList.add('show');
+    });
+    installHint.onclick = async () => {
+      if (deferredPrompt) {
+        deferredPrompt.prompt(); await deferredPrompt.userChoice; deferredPrompt = null;
+        installHint.classList.remove('show');
+      }
+    };
+    window.addEventListener('appinstalled', () => { installHint.classList.remove('show'); });
+
+    // --- Register Service Worker ---
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('sw.js').catch(console.error);
+    }
+
+    // Initial render
+    render();
+  </script>
+</body>
+</html>
