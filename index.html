@@ -107,7 +107,8 @@
         setStatus('Ready — tap mic or type a command');
         return;
       }
-      if (type === 'error') { setStatus('Error: ' + error); return; }
+      if (type === 'error') { setStatus('Error: ' + (error || 'unknown error')); return; }
+      if (type === 'progress') { setStatus('Loading: ' + e.data.stage + (e.data.size ? ` (${(e.data.size/1024/1024).toFixed(1)} MB)` : '')); return; }
       if (type === 'loaded') {
         worker.postMessage({ type: 'init', tools });
         return;

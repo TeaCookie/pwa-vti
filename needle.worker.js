@@ -23,6 +23,13 @@ let engine = null;
 let outputPtr = 0;
 let initialized = false;
 
+function errorMessage(err) {
+  if (err instanceof Error) return err.message;
+  if (typeof err === 'string') return err;
+  if (err && typeof err === 'object' && 'message' in err) return String(err.message);
+  return String(err);
+}
+
 async function cachedFetch(url, checksum) {
   const cache = await caches.open(CACHE_NAME);
   const cached = await cache.match(url);
@@ -60,15 +67,18 @@ async function cachedFetch(url, checksum) {
 }
 
 async function loadRuntime() {
+  self.postMessage({ type: 'progress', stage: 'fetching runtime' });
   const [jsResponse, wasmResponse] = await Promise.all([
     cachedFetch(RUNTIME_URL, CHECKSUMS['cactus.js']),
     cachedFetch(WASM_URL, CHECKSUMS['cactus.wasm'])
   ]);
 
+  self.postMessage({ type: 'progress', stage: 'reading runtime' });
   const source = await jsResponse.text();
   const wasmBytes = await wasmResponse.arrayBuffer();
 
   // Load cactus.js via importScripts (create blob URL)
+  self.postMessage({ type: 'progress', stage: 'loading runtime' });
   const url = URL.createObjectURL(new Blob([source], { type: 'text/javascript' }));
   try {
     importScripts(url);
@@ -79,6 +89,7 @@ async function loadRuntime() {
   URL.revokeObjectURL(url);
 
   // Create engine instance (createCactus is global after importScripts)
+  self.postMessage({ type: 'progress', stage: 'creating engine' });
   if (typeof createCactus !== 'function') {
     throw new Error('createCactus not found - importScripts may have failed');
   }
@@ -101,14 +112,18 @@ async function loadRuntime() {
 }
 
 async function loadModel() {
+  self.postMessage({ type: 'progress', stage: 'fetching model' });
   const modelResponse = await cachedFetch(MODEL_URL);
+  self.postMessage({ type: 'progress', stage: 'reading model' });
   const modelBytes = new Uint8Array(await modelResponse.arrayBuffer());
+  self.postMessage({ type: 'progress', stage: 'loading model', size: modelBytes.length });
 
   const pointer = engine._malloc(modelBytes.length);
   if (!pointer) throw new Error('The model exceeds available browser memory');
 
   try {
     engine.HEAPU8.set(modelBytes, pointer);
+    self.postMessage({ type: 'progress', stage: 'initializing model' });
     if (engine._cactus_load(pointer, BigInt(modelBytes.length)) < 0) {
       throw new Error('The model could not be loaded');
     }
@@ -161,11 +176,11 @@ self.onmessage = async (e) => {
         throw new Error('Unknown message type: ' + type);
     }
   } catch (err) {
-    self.postMessage({ type: 'error', message: err.message });
+    self.postMessage({ type: 'error', message: errorMessage(err) });
   }
 };
 
 // Start loading runtime immediately
 loadRuntime().catch((err) => {
-  self.postMessage({ type: 'error', message: 'Load failed: ' + err.message });
+  self.postMessage({ type: 'error', message: 'Load failed: ' + errorMessage(err) });
 });
