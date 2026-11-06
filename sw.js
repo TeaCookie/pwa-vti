@@ -9,7 +9,18 @@ const ASSETS = [
 ];
 
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS)));
+  e.waitUntil(
+    caches.open(CACHE_NAME).then((cache) =>
+      Promise.all(
+        ASSETS.map((url) =>
+          cache.add(url).catch((err) => {
+            console.warn(`Failed to cache ${url}:`, err);
+            // Don't fail the entire install for one file
+          })
+        )
+      )
+    )
+  );
   self.skipWaiting();
 });
 
@@ -26,6 +37,9 @@ self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
   if (url.origin !== location.origin) return;
   e.respondWith(
-    caches.match(e.request).then((cached) => cached || fetch(e.request))
+    caches.match(e.request).then((cached) => cached || fetch(e.request).catch((err) => {
+      console.warn('Fetch failed:', e.request.url, err);
+      return new Response('Offline', { status: 503 });
+    }))
   );
 });
