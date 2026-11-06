@@ -24,10 +24,20 @@ let outputPtr = 0;
 let initialized = false;
 
 function errorMessage(err) {
-  if (err instanceof Error) return err.message;
+  if (err instanceof Error) {
+    return `${err.name}: ${err.message}\n${err.stack || ''}`;
+  }
   if (typeof err === 'string') return err;
   if (err && typeof err === 'object' && 'message' in err) return String(err.message);
-  return String(err);
+  return `Unknown error: ${JSON.stringify(err)}`;
+}
+
+function wrapError(context, fn) {
+  try {
+    return fn();
+  } catch (err) {
+    throw new Error(`${context}: ${errorMessage(err)}`);
+  }
 }
 
 async function cachedFetch(url, checksum) {
@@ -68,36 +78,35 @@ async function cachedFetch(url, checksum) {
 
 async function loadRuntime() {
   self.postMessage({ type: 'progress', stage: 'fetching runtime' });
-  const [jsResponse, wasmResponse] = await Promise.all([
+  const [jsResponse, wasmResponse] = await wrapError('fetching runtime', () => Promise.all([
     cachedFetch(RUNTIME_URL, CHECKSUMS['cactus.js']),
     cachedFetch(WASM_URL, CHECKSUMS['cactus.wasm'])
-  ]);
+  ]));
 
   self.postMessage({ type: 'progress', stage: 'reading runtime' });
-  const source = await jsResponse.text();
-  const wasmBytes = await wasmResponse.arrayBuffer();
+  const source = await wrapError('reading cactus.js', () => jsResponse.text());
+  const wasmBytes = await wrapError('reading cactus.wasm', () => wasmResponse.arrayBuffer());
 
   // Load cactus.js via importScripts (create blob URL)
   self.postMessage({ type: 'progress', stage: 'loading runtime' });
   const url = URL.createObjectURL(new Blob([source], { type: 'text/javascript' }));
-  try {
+  await wrapError('importScripts', () => {
     importScripts(url);
-  } catch (e) {
-    URL.revokeObjectURL(url);
-    throw new Error(`importScripts failed: ${e.message} - CSP may block blob URLs`);
-  }
+  });
   URL.revokeObjectURL(url);
 
   // Create engine instance (createCactus is global after importScripts)
   self.postMessage({ type: 'progress', stage: 'creating engine' });
-  if (typeof createCactus !== 'function') {
-    throw new Error('createCactus not found - importScripts may have failed');
-  }
-  engine = createCactus({ wasmBinary: wasmBytes });
-  if (!engine) throw new Error('createCactus returned null/undefined');
+  await wrapError('createCactus', () => {
+    if (typeof createCactus !== 'function') {
+      throw new Error('createCactus not found - importScripts may have failed');
+    }
+    engine = createCactus({ wasmBinary: wasmBytes });
+    if (!engine) throw new Error('createCactus returned null/undefined');
+  });
 
   // Allocate output buffer
-  outputPtr = engine._malloc(CAPACITY);
+  outputPtr = await wrapError('malloc output buffer', () => engine._malloc(CAPACITY));
   if (!outputPtr) throw new Error('Insufficient browser memory');
 
   // Request persistent storage
@@ -113,20 +122,27 @@ async function loadRuntime() {
 
 async function loadModel() {
   self.postMessage({ type: 'progress', stage: 'fetching model' });
-  const modelResponse = await cachedFetch(MODEL_URL);
+  const modelResponse = await wrapError('fetching model', () => cachedFetch(MODEL_URL));
+
   self.postMessage({ type: 'progress', stage: 'reading model' });
-  const modelBytes = new Uint8Array(await modelResponse.arrayBuffer());
+  const modelBytes = await wrapError('reading model bytes', () => {
+    return new Uint8Array(await modelResponse.arrayBuffer());
+  });
   self.postMessage({ type: 'progress', stage: 'loading model', size: modelBytes.length });
 
-  const pointer = engine._malloc(modelBytes.length);
+  const pointer = await wrapError('malloc model buffer', () => engine._malloc(modelBytes.length));
   if (!pointer) throw new Error('The model exceeds available browser memory');
 
   try {
-    engine.HEAPU8.set(modelBytes, pointer);
+    await wrapError('copying model to heap', () => {
+      engine.HEAPU8.set(modelBytes, pointer);
+    });
     self.postMessage({ type: 'progress', stage: 'initializing model' });
-    if (engine._cactus_load(pointer, BigInt(modelBytes.length)) < 0) {
-      throw new Error('The model could not be loaded');
-    }
+    await wrapError('cactus_load', () => {
+      if (engine._cactus_load(pointer, BigInt(modelBytes.length)) < 0) {
+        throw new Error('The model could not be loaded');
+      }
+    });
   } finally {
     engine._free(pointer);
   }
@@ -139,8 +155,10 @@ async function initializeNeedle(tools) {
 
   // cactus_init("", tools_json_string, 0)
   const toolsJson = JSON.stringify(tools);
-  const result = engine.ccall('cactus_init', 'number', ['string', 'string', 'number'], ['', toolsJson, 0]);
-  if (Number(result) < 0) throw new Error('The tools could not initialize');
+  await wrapError('cactus_init', () => {
+    const result = engine.ccall('cactus_init', 'number', ['string', 'string', 'number'], ['', toolsJson, 0]);
+    if (Number(result) < 0) throw new Error('The tools could not initialize');
+  });
 
   initialized = true;
   self.postMessage({ type: 'ready' });
@@ -150,10 +168,12 @@ async function complete(text, id) {
   if (!initialized) throw new Error('Needle not initialized');
 
   // cactus_complete(text, 0, 0, 384, outputPtr, CAPACITY)
-  const code = engine.ccall('cactus_complete', 'number', ['string', 'number', 'number', 'number', 'number', 'number'], [text, 0, 0, 384, outputPtr, CAPACITY]);
-  if (code < 0) throw new Error('Inference failed');
+  await wrapError('cactus_complete', () => {
+    const code = engine.ccall('cactus_complete', 'number', ['string', 'number', 'number', 'number', 'number', 'number'], [text, 0, 0, 384, outputPtr, CAPACITY]);
+    if (code < 0) throw new Error('Inference failed');
+  });
 
-  const output = engine.UTF8ToString(outputPtr);
+  const output = await wrapError('UTF8ToString', () => engine.UTF8ToString(outputPtr));
   self.postMessage({ type: 'result', id, output });
 }
 
