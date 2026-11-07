@@ -114,8 +114,14 @@
 
     // Tool schemas for Needle
     const tools = [
-      { name: 'modify', description: 'Change the counter by a positive or negative amount. Use positive numbers to add, negative numbers to subtract. Examples: "add 5" -> 5, "minus 3" -> -3, "subtract 2" -> -2, "plus 1" -> 1, "increase by 4" -> 4, "decrease by 3" -> -3, "take away 2" -> -2', parameters: { type: 'object', properties: { amount: { type: 'number' } }, required: ['amount'] } },
-      { name: 'reset', description: 'Reset counter to zero', parameters: { type: 'object', properties: {}, required: [] } }
+      { name: 'modify', description: 'Change the counter by a positive or negative amount. Use positive numbers to add, negative numbers to subtract. Examples: "add 5" -> 5, "minus 3" -> -3, "subtract 2" -> -2, "plus 1" -> 1, "increase by 4" -> 4, "decrease by 3" -> -3, "take away 2" -> -2', parameters: { type: 'object', properties: { amount: { type: 'number' } }, required: ['amount'] }, triggers: [
+        "^(?![\\s\\S]*\\b(and|then|also)\\b)[\\s\\S]*\\b(add|plus|increase|more|higher|count up)\\b[\\s\\S]*\\b\\d+",
+        "^(?![\\s\\S]*\\b(and|then|also)\\b)[\\s\\S]*\\b(subtract|minus|decrease|less|lower|reduce|take away)\\b[\\s\\S]*\\b\\d+",
+        "^(?![\\s\\S]*\\b(and|then|also)\\b)[\\s\\S]*[+-]\\s*\\d+"
+      ] },
+      { name: 'reset', description: 'Reset counter to zero', parameters: { type: 'object', properties: {}, required: [] }, triggers: [
+        "^(?![\\s\\S]*\\b(and|then|also)\\b)[\\s\\S]*\\b(reset|zero|clear)\\b"
+      ] }
     ];
 
     worker.onmessage = (e) => {
