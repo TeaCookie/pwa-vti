@@ -43,6 +43,12 @@
     .raw-output { font-family: monospace; font-size: 0.75rem; color: #94a3b8; white-space: pre-wrap; word-break: break-word; max-width: 400px; text-align: left; }
     .install-hint { position: fixed; bottom: 1rem; left: 50%; transform: translateX(-50%); background: #1e293b; color: white; padding: 0.75rem 1.5rem; border-radius: 0.5rem; font-size: 0.875rem; opacity: 0; transition: opacity 0.3s; pointer-events: none; }
     .install-hint.show { opacity: 1; }
+    /* Debug log panel */
+    .debug-panel { width: 100%; max-width: 600px; background: #1e293b; color: #e2e8f0; padding: 0.5rem; border-radius: 0.5rem; font-family: monospace; font-size: 0.7rem; max-height: 200px; overflow-y: auto; }
+    .debug-entry { padding: 0.1rem 0; border-bottom: 1px solid #334155; }
+    .debug-entry.error { color: #f87171; }
+    .debug-entry.progress { color: #60a5fa; }
+    .debug-entry.debug { color: #a3e635; }
   </style>
 </head>
 <body>
@@ -60,6 +66,7 @@
   </div>
   <div class="status" id="status">Loading Needle…</div>
   <div class="raw-output" id="rawOutput"></div>
+  <div class="debug-panel" id="debugPanel"></div>
   <div class="install-hint" id="installHint">Install app for offline use</div>
 
   <script>
@@ -72,11 +79,23 @@
     const debugInput = document.getElementById('debugInput');
     const debugBtn = document.getElementById('debugBtn');
     const installHint = document.getElementById('installHint');
+    const debugPanel = document.getElementById('debugPanel');
 
     function render() { counterEl.textContent = count; }
     function save() { localStorage.setItem('voice-counter', String(count)); }
     function setStatus(msg) { statusEl.textContent = msg; }
     function setRawOutput(text) { rawOutputEl.textContent = text; }
+
+    function addDebugEntry(message, data = null, className = 'debug') {
+      const entry = document.createElement('div');
+      entry.className = `debug-entry ${className}`;
+      const time = new Date().toLocaleTimeString();
+      let text = `[${time}] ${message}`;
+      if (data) text += ' ' + JSON.stringify(data);
+      entry.textContent = text;
+      debugPanel.appendChild(entry);
+      debugPanel.scrollTop = debugPanel.scrollHeight;
+    }
 
     // --- Basic button handlers (work without Needle) ---
     document.getElementById('incrementBtn').onclick = () => { count++; save(); render(); };
@@ -97,7 +116,11 @@
     ];
 
     worker.onmessage = (e) => {
-      const { type, id, output, error, ready } = e.data;
+      const { type, id, output, error, ready, message, data } = e.data;
+      if (type === 'debug') {
+        addDebugEntry(message, data, 'debug');
+        return;
+      }
       if (type === 'ready') {
         workerReady = true;
         micBtn.disabled = false;
@@ -105,12 +128,24 @@
         debugBtn.disabled = false;
         micBtn.title = 'Tap to speak';
         setStatus('Ready — tap mic or type a command');
+        addDebugEntry('Worker ready!');
         return;
       }
-      if (type === 'error') { setStatus('Error: ' + (error || 'unknown error')); return; }
-      if (type === 'progress') { setStatus('Loading: ' + e.data.stage + (e.data.size ? ` (${(e.data.size/1024/1024).toFixed(1)} MB)` : '')); return; }
+      if (type === 'error') {
+        const errMsg = 'Error: ' + (error || 'unknown error');
+        setStatus(errMsg);
+        addDebugEntry(errMsg, null, 'error');
+        return;
+      }
+      if (type === 'progress') {
+        const stageMsg = 'Loading: ' + e.data.stage + (e.data.size ? ` (${(e.data.size/1024/1024).toFixed(1)} MB)` : '');
+        setStatus(stageMsg);
+        addDebugEntry(stageMsg, null, 'progress');
+        return;
+      }
       if (type === 'loaded') {
         worker.postMessage({ type: 'init', tools });
+        addDebugEntry('Runtime loaded, initializing tools...');
         return;
       }
       if (type === 'result') {
@@ -137,6 +172,7 @@
       pending.set(id, performance.now());
       worker.postMessage({ type: 'complete', text, id });
       setStatus('Processing…');
+      addDebugEntry(`Sending to worker: "${text}" (id: ${id})`);
     }
 
     function handleCommand(name, args) {
