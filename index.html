@@ -103,7 +103,11 @@
     document.getElementById('resetBtn').onclick = () => { count = 0; save(); render(); };
 
     // --- Needle Worker wiring ---
+    addDebugEntry('Creating Needle worker...');
     const worker = new Worker('needle.worker.js');
+    worker.onerror = (e) => {
+      addDebugEntry(`Worker error: ${e.message}`, { filename: e.filename, lineno: e.lineno, colno: e.colno }, 'error');
+    };
     let workerReady = false;
     let pendingId = 0;
     const pending = new Map();
@@ -117,6 +121,7 @@
 
     worker.onmessage = (e) => {
       const { type, id, output, error, ready, message, data } = e.data;
+      addDebugEntry(`MAIN received: ${type}`, e.data);
       if (type === 'debug') {
         addDebugEntry(message, data, 'debug');
         return;
@@ -128,7 +133,7 @@
         debugBtn.disabled = false;
         micBtn.title = 'Tap to speak';
         setStatus('Ready — tap mic or type a command');
-        addDebugEntry('Worker ready!');
+        addDebugEntry('Worker ready! UI unlocked.');
         return;
       }
       if (type === 'error') {
@@ -144,6 +149,7 @@
         return;
       }
       if (type === 'loaded') {
+        addDebugEntry('Sending init message to worker...');
         worker.postMessage({ type: 'init', tools });
         addDebugEntry('Runtime loaded, initializing tools...');
         return;

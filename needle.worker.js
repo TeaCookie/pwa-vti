@@ -256,10 +256,11 @@ self.onmessage = async (e) => {
       case 'load':
         log('handling load message');
         await loadRuntime();
+        log('loadRuntime complete, sending loaded message');
         self.postMessage({ type: 'loaded' });
         break;
       case 'init':
-        log('handling init message');
+        log('handling init message, tools:', tools);
         await initializeNeedle(tools);
         break;
       case 'complete':
