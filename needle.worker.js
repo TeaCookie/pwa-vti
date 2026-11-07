@@ -278,7 +278,10 @@ self.onmessage = async (e) => {
 
 // Start loading runtime immediately
 log('Starting initial loadRuntime...');
-loadRuntime().catch((err) => {
+loadRuntime().then(() => {
+  log('Initial loadRuntime complete, sending loaded message');
+  self.postMessage({ type: 'loaded' });
+}).catch((err) => {
   log(`Initial loadRuntime FAILED: ${errorMessage(err)}`);
   self.postMessage({ type: 'error', message: 'Load failed: ' + errorMessage(err) });
 });
