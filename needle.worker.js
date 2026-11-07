@@ -7,13 +7,13 @@ const CACHE_NAME = 'needle-v1';
 // Local file paths - served from same origin to avoid CORS issues
 const RUNTIME_URL = './cactus.js';
 const WASM_URL = './cactus.wasm';
-const MODEL_URL = './needle3.cact';
+const MODEL_URL = './tuned_needle3.cact';
 
 // Checksums for integrity verification (SHA-256)
 const CHECKSUMS = {
   'cactus.js': 'bb61bcf0c48712bfb9cd0ade8f0748889dfde9944ac308220f42afbc605f82bc',
   'cactus.wasm': '4198b30795ded7739fe6c9e80bf26d5a844767c081574d40c8dc0487cde8b4b6',
-  'needle3.cact': 'c9d915eca282ed42d1a09b143b592adb4cc6744ffe2d294adf5cfc5548170c38'
+  'tuned_needle3.cact': 'b1090ff8f72df5120a86e52d8a8afb534bf5efb2656692c0da0a7913b609b060'
 };
 
 const CAPACITY = 1 << 18; // 262144 bytes for output buffer
@@ -73,10 +73,7 @@ async function cachedFetch(url, checksum) {
     throw new Error(`Download failed (${response.status}): ${response.statusText} - ${url}`);
   }
 
-  // Clone the response BEFORE reading it, so we can return a readable response
-  const responseForReturn = response.clone();
-
-  // Read the original response for checksum verification and caching
+  // Read the response body FIRST (consumes the stream)
   const bytes = new Uint8Array(await response.arrayBuffer());
   log(`  downloaded ${bytes.length} bytes from ${url}`);
 
@@ -87,11 +84,14 @@ async function cachedFetch(url, checksum) {
     log(`  checksum OK after download: ${url}`);
   }
 
+  // Create TWO new Response objects from the bytes - one for return, one for cache
+  // This avoids the "body stream already read" issue with cloned Responses
+  const responseForReturn = new Response(bytes.slice()); // slice() creates a copy
   const cachedResponse = new Response(bytes);
-  await cache.put(url, cachedResponse.clone());
+  await cache.put(url, cachedResponse);
   log(`  cached: ${url}`);
 
-  // Return the cloned original response (not yet read)
+  // Return a fresh Response from the bytes
   return responseForReturn;
 }
 
@@ -170,7 +170,7 @@ async function loadModel() {
   log('=== loadModel START ===');
   self.postMessage({ type: 'progress', stage: 'fetching model' });
   log('fetching model...');
-  const modelResponse = await wrapError('fetching model', () => cachedFetch(MODEL_URL, CHECKSUMS['needle3.cact']));
+  const modelResponse = await wrapError('fetching model', () => cachedFetch(MODEL_URL, CHECKSUMS['tuned_needle3.cact']));
   log('model fetched successfully');
 
   self.postMessage({ type: 'progress', stage: 'reading model' });
