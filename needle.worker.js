@@ -1,20 +1,18 @@
 // needle.worker.js - Needle 3 in a Web Worker with Cache API caching
-// Based on sandbox.worker.js from Cactus Compute demo
+// Loads model and runtime from local files (same origin) for Netlify compatibility
 
 const CACHE_NAME = 'needle-v1';
 
-// Pinned revisions from sandbox.worker.js
-const ENGINE_BASE = 'https://huggingface.co/Cactus-Compute/cactus/resolve/1a028f5a3972b67dd8d8752f882113d475e7ec4c/releases/4.0.0/wasm';
-const NEEDLE_BASE = 'https://huggingface.co/Cactus-Compute/needle3/resolve/d6c7d6a2e9655505e0f8e23339356dd1705900eb';
+// Local file paths - served from same origin to avoid CORS issues
+const RUNTIME_URL = './cactus.js';
+const WASM_URL = './cactus.wasm';
+const MODEL_URL = './needle3.cact';
 
-const RUNTIME_URL = `${ENGINE_BASE}/cactus.js`;
-const WASM_URL = `${ENGINE_BASE}/cactus.wasm`;
-const MODEL_URL = `${NEEDLE_BASE}/needle3.cact`;
-
-// Checksums from sandbox.worker.js
+// Checksums for integrity verification (SHA-256)
 const CHECKSUMS = {
   'cactus.js': 'bb61bcf0c48712bfb9cd0ade8f0748889dfde9944ac308220f42afbc605f82bc',
-  'cactus.wasm': '4198b30795ded7739fe6c9e80bf26d5a844767c081574d40c8dc0487cde8b4b6'
+  'cactus.wasm': '4198b30795ded7739fe6c9e80bf26d5a844767c081574d40c8dc0487cde8b4b6',
+  'needle3.cact': 'c9d915eca282ed42d1a09b143b592adb4cc6744ffe2d294adf5cfc5548170c38'
 };
 
 const CAPACITY = 1 << 18; // 262144 bytes for output buffer
@@ -50,15 +48,16 @@ async function cachedFetch(url, checksum) {
       const digest = await crypto.subtle.digest('SHA-256', bytes);
       const actual = Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('');
       if (actual === checksum) return cloned;
+      // Checksum mismatch - fall through to re-fetch
     } else {
       return cloned;
     }
   }
 
-  // Explicit CORS mode for cross-origin requests to Hugging Face
-  const response = await fetch(url, { mode: 'cors', credentials: 'omit' });
+  // Same-origin fetch (no CORS needed)
+  const response = await fetch(url);
   if (!response.ok) {
-    throw new Error(`Download failed (${response.status}): ${response.statusText} - Check CORS headers on ${url}`);
+    throw new Error(`Download failed (${response.status}): ${response.statusText} - ${url}`);
   }
 
   const bytes = new Uint8Array(await response.arrayBuffer());
@@ -66,12 +65,10 @@ async function cachedFetch(url, checksum) {
   if (checksum) {
     const digest = await crypto.subtle.digest('SHA-256', bytes);
     const actual = Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('');
-    if (actual !== checksum) throw new Error('Runtime checksum mismatch');
+    if (actual !== checksum) throw new Error(`Checksum mismatch for ${url}`);
   }
 
-  const cachedResponse = new Response(bytes, {
-    headers: { 'Access-Control-Allow-Origin': '*' }
-  });
+  const cachedResponse = new Response(bytes);
   await cache.put(url, cachedResponse.clone());
   return cachedResponse;
 }
@@ -122,10 +119,10 @@ async function loadRuntime() {
 
 async function loadModel() {
   self.postMessage({ type: 'progress', stage: 'fetching model' });
-  const modelResponse = await wrapError('fetching model', () => cachedFetch(MODEL_URL));
+  const modelResponse = await wrapError('fetching model', () => cachedFetch(MODEL_URL, CHECKSUMS['needle3.cact']));
 
   self.postMessage({ type: 'progress', stage: 'reading model' });
-  const modelBytes = await wrapError('reading model bytes', () => {
+  const modelBytes = await wrapError('reading model bytes', async () => {
     return new Uint8Array(await modelResponse.arrayBuffer());
   });
   self.postMessage({ type: 'progress', stage: 'loading model', size: modelBytes.length });

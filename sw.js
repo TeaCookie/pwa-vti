@@ -5,7 +5,10 @@ const ASSETS = [
   './manifest.webmanifest',
   './icon-192.svg',
   './icon-512.svg',
-  './needle.worker.js'
+  './needle.worker.js',
+  './cactus.js',
+  './cactus.wasm',
+  './needle3.cact'
 ];
 
 self.addEventListener('install', (e) => {
