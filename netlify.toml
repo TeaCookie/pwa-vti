@@ -2,9 +2,6 @@
   command = "node download-models.js"
   publish = "."
 
-[functions]
-  node_bundler = "esbuild"
-
 [[headers]]
   for = "/*"
   [headers.values]
