@@ -112,16 +112,41 @@
     let pendingId = 0;
     const pending = new Map();
 
-    // Tool schemas for Needle
+    // Tool schemas for Needle (matching CactusCompute demo format)
     const tools = [
-      { name: 'modify', description: 'Change the counter by a positive or negative amount. Use positive numbers to add, negative numbers to subtract. Examples: "add 5" -> 5, "minus 3" -> -3, "subtract 2" -> -2, "plus 1" -> 1, "increase by 4" -> 4, "decrease by 3" -> -3, "take away 2" -> -2', parameters: { type: 'object', properties: { amount: { type: 'number' } }, required: ['amount'] }, triggers: [
-        "^(?![\\s\\S]*\\b(and|then|also)\\b)[\\s\\S]*\\b(add|plus|increase|more|higher|count up)\\b[\\s\\S]*\\b\\d+",
-        "^(?![\\s\\S]*\\b(and|then|also)\\b)[\\s\\S]*\\b(subtract|minus|decrease|less|lower|reduce|take away)\\b[\\s\\S]*\\b\\d+",
-        "^(?![\\s\\S]*\\b(and|then|also)\\b)[\\s\\S]*[+-]\\s*\\d+"
-      ] },
-      { name: 'reset', description: 'Reset counter to zero', parameters: { type: 'object', properties: {}, required: [] }, triggers: [
-        "^(?![\\s\\S]*\\b(and|then|also)\\b)[\\s\\S]*\\b(reset|zero|clear)\\b"
-      ] }
+      {
+        name: 'modify',
+        description: 'Change the counter by a positive or negative amount. Use positive numbers to add to the counter, negative numbers to subtract from the counter.',
+        parameters: {
+          type: 'object',
+          properties: {
+            amount: {
+              type: 'number',
+              description: 'The amount to change the counter by. Positive numbers increase the counter (e.g., 5, +3). Negative numbers decrease the counter (e.g., -5, -3). Can be any integer.'
+            }
+          },
+          required: ['amount']
+        },
+        triggers: [
+          "^(?!.*\\b(and|then|also)\\b).*\\b(add|plus|increase|more|higher|count up)\\b.*\\d+",
+          "^(?!.*\\b(and|then|also)\\b).*\\b(subtract|minus|decrease|less|lower|reduce|take away)\\b.*\\d+",
+          "^(?!.*\\b(and|then|also)\\b).*[+-]\\s*\\d+",
+          "^\\-\\s*\\d+",
+          "^\\+\\s*\\d+"
+        ]
+      },
+      {
+        name: 'reset',
+        description: 'Reset the counter to zero.',
+        parameters: {
+          type: 'object',
+          properties: {},
+          required: []
+        },
+        triggers: [
+          "^(?!.*\\b(and|then|also)\\b).*\\b(reset|zero|clear)\\b"
+        ]
+      }
     ];
 
     worker.onmessage = (e) => {
