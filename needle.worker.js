@@ -136,7 +136,7 @@ async function loadRuntime() {
   // Create engine instance (createCactus is global after importScripts)
   self.postMessage({ type: 'progress', stage: 'creating engine' });
   log('checking if createCactus is available...');
-  await wrapError('createCactus', () => {
+  await wrapError('createCactus', async () => {
     log(`  typeof createCactus: ${typeof createCactus}`);
     if (typeof createCactus !== 'function') {
       throw new Error('createCactus not found - importScripts may have failed');
