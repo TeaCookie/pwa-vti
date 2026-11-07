@@ -3,9 +3,11 @@
 // so they can be served from the same origin (avoiding CORS issues)
 
 const https = require('https');
+const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { URL } = require('url');
 
 // Model files to download
 const MODELS = [
@@ -29,8 +31,28 @@ const MODELS = [
   }
 ];
 
-async function downloadFile(model) {
+function getHttpClient(url) {
+  return url.startsWith('https:') ? https : http;
+}
+
+function resolveUrl(baseUrl, redirectUrl) {
+  try {
+    // Use URL constructor to properly resolve relative URLs
+    return new URL(redirectUrl, baseUrl).toString();
+  } catch (err) {
+    console.warn(`Failed to resolve redirect URL: ${redirectUrl}, base: ${baseUrl}`);
+    throw err;
+  }
+}
+
+async function downloadFile(model, currentUrl = null, redirectCount = 0) {
   const filePath = path.join(__dirname, model.name);
+  const url = currentUrl || model.url;
+
+  // Prevent infinite redirects
+  if (redirectCount > 10) {
+    throw new Error(`Too many redirects for ${model.name}`);
+  }
 
   // Check if file already exists and has correct checksum
   if (fs.existsSync(filePath)) {
@@ -49,14 +71,23 @@ async function downloadFile(model) {
     let downloaded = 0;
     const startTime = Date.now();
 
-    https.get(model.url, (response) => {
+    const client = getHttpClient(url);
+    const request = client.get(url, (response) => {
       // Follow redirects
-      if (response.statusCode === 301 || response.statusCode === 302 || response.statusCode === 307) {
+      if (response.statusCode === 301 || response.statusCode === 302 || response.statusCode === 303 || response.statusCode === 307 || response.statusCode === 308) {
         if (response.headers.location) {
           file.close();
           fs.unlinkSync(filePath);
-          downloadFile({ ...model, url: response.headers.location }).then(resolve).catch(reject);
-          return;
+          try {
+            const redirectUrl = resolveUrl(url, response.headers.location);
+            console.log(`  → Redirect (${response.statusCode}) to ${redirectUrl.substring(0, 100)}...`);
+            // Recursively download from redirect URL
+            downloadFile(model, redirectUrl, redirectCount + 1).then(resolve).catch(reject);
+            return;
+          } catch (err) {
+            reject(new Error(`Invalid redirect URL for ${model.name}: ${err.message}`));
+            return;
+          }
         }
       }
 
@@ -98,10 +129,19 @@ async function downloadFile(model) {
         fs.unlinkSync(filePath);
         reject(err);
       });
-    }).on('error', (err) => {
+    });
+
+    request.on('error', (err) => {
       file.close();
       if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
       reject(err);
+    });
+
+    // Set timeout for large file downloads (5 minutes)
+    request.setTimeout(5 * 60 * 1000, () => {
+      request.destroy();
+      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+      reject(new Error(`Download timeout for ${model.name}`));
     });
   });
 }
