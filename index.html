@@ -114,8 +114,7 @@
 
     // Tool schemas for Needle
     const tools = [
-      { name: 'add', description: 'Add a positive number to the counter (increase the count). Examples: "add 5", "plus 3", "increase by 2", "count up 1"', parameters: { type: 'object', properties: { amount: { type: 'number', default: 1 } }, required: [] } },
-      { name: 'subtract', description: 'Subtract a number from the counter (decrease the count). Examples: "subtract 5", "minus 3", "decrease by 2", "reduce by 1", "take away 4"', parameters: { type: 'object', properties: { amount: { type: 'number', default: 1 } }, required: [] } },
+      { name: 'modify', description: 'Change the counter by a positive or negative amount. Use positive numbers to add, negative numbers to subtract. Examples: "add 5" -> 5, "minus 3" -> -3, "subtract 2" -> -2, "plus 1" -> 1, "increase by 4" -> 4, "decrease by 3" -> -3, "take away 2" -> -2', parameters: { type: 'object', properties: { amount: { type: 'number' } }, required: ['amount'] } },
       { name: 'reset', description: 'Reset counter to zero', parameters: { type: 'object', properties: {}, required: [] } }
     ];
 
@@ -200,8 +199,7 @@
     function handleCommand(name, args) {
       const amount = typeof args.amount === 'number' ? args.amount : 1;
       switch (name) {
-        case 'add': count += amount; break;
-        case 'subtract': count -= amount; break;
+        case 'modify': count += amount; break;
         case 'reset': count = 0; break;
       }
       save(); render();
