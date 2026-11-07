@@ -1,0 +1,3 @@
+[build]
+  command = "node download-models.js"
+  publish = "."

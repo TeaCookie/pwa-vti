@@ -1,0 +1,9 @@
+# Exclude from Netlify deploy
+.git/
+.claude/
+models/
+*.md
+download-models.js
+netlify.toml
+.gitignore
+.netlifyignore
