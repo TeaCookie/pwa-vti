@@ -114,8 +114,8 @@
 
     // Tool schemas for Needle
     const tools = [
-      { name: 'increment', description: 'Increase counter', parameters: { type: 'object', properties: { amount: { type: 'number', default: 1 } }, required: [] } },
-      { name: 'decrement', description: 'Decrease counter', parameters: { type: 'object', properties: { amount: { type: 'number', default: 1 } }, required: [] } },
+      { name: 'increment', description: 'Add to the counter (make it larger). Use for: add, plus, increase, more, higher, count up', parameters: { type: 'object', properties: { amount: { type: 'number', default: 1 } }, required: [] } },
+      { name: 'decrement', description: 'Subtract from the counter (make it smaller). Use for: subtract, minus, decrease, less, lower, reduce, take away, count down', parameters: { type: 'object', properties: { amount: { type: 'number', default: 1 } }, required: [] } },
       { name: 'reset', description: 'Reset counter to zero', parameters: { type: 'object', properties: {}, required: [] } }
     ];
 
