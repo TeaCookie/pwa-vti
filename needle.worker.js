@@ -136,7 +136,7 @@ async function loadRuntime() {
       throw new Error('createCactus not found - importScripts may have failed');
     }
     log('  calling createCactus with wasmBinary...');
-    engine = createCactus({ wasmBinary: wasmBytes });
+    engine = await createCactus({ wasmBinary: wasmBytes });
     log(`  engine created: ${!!engine}`);
     if (!engine) throw new Error('createCactus returned null/undefined');
   });
