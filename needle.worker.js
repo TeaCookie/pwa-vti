@@ -73,6 +73,10 @@ async function cachedFetch(url, checksum) {
     throw new Error(`Download failed (${response.status}): ${response.statusText} - ${url}`);
   }
 
+  // Clone the response BEFORE reading it, so we can return a readable response
+  const responseForReturn = response.clone();
+
+  // Read the original response for checksum verification and caching
   const bytes = new Uint8Array(await response.arrayBuffer());
   log(`  downloaded ${bytes.length} bytes from ${url}`);
 
@@ -86,7 +90,9 @@ async function cachedFetch(url, checksum) {
   const cachedResponse = new Response(bytes);
   await cache.put(url, cachedResponse.clone());
   log(`  cached: ${url}`);
-  return cachedResponse;
+
+  // Return the cloned original response (not yet read)
+  return responseForReturn;
 }
 
 async function loadRuntime() {
