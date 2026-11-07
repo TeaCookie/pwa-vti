@@ -161,9 +161,25 @@
         setRawOutput(output);
         try {
           const parsed = JSON.parse(output);
-          if (parsed && parsed.name && typeof parsed.arguments === 'object') {
+          let handled = false;
+
+          // Handle new format: { function_calls: [{ name, arguments }, ...] }
+          if (parsed && Array.isArray(parsed.function_calls)) {
+            for (const call of parsed.function_calls) {
+              if (call.name && typeof call.arguments === 'object') {
+                handleCommand(call.name, call.arguments);
+                handled = true;
+              }
+            }
+          }
+          // Fallback: old format { name, arguments }
+          else if (parsed && parsed.name && typeof parsed.arguments === 'object') {
             handleCommand(parsed.name, parsed.arguments);
-            setStatus(`Executed ${parsed.name} (${elapsed})`);
+            handled = true;
+          }
+
+          if (handled) {
+            setStatus(`Executed (${elapsed})`);
           } else {
             setStatus('No command understood (' + elapsed + ')');
           }
