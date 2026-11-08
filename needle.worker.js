@@ -234,6 +234,13 @@ async function complete(text, id) {
   log(`=== complete START: "${text}" (id: ${id}) ===`);
   if (!initialized) throw new Error('Needle not initialized');
 
+  // Reset model state to ensure each command is independent (no conversation context)
+  await wrapError('cactus_reset', () => {
+    const code = engine._cactus_reset();
+    log(`  cactus_reset code: ${code}`);
+    if (code < 0) throw new Error('Reset failed');
+  });
+
   // cactus_complete(text, 0, 0, 384, outputPtr, CAPACITY)
   await wrapError('cactus_complete', () => {
     const code = engine.ccall('cactus_complete', 'number', ['string', 'number', 'number', 'number', 'number', 'number'], [text, 0, 0, 384, outputPtr, CAPACITY]);
