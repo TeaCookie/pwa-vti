@@ -7,13 +7,13 @@ const CACHE_NAME = 'needle-v1';
 // Local file paths - served from same origin to avoid CORS issues
 const RUNTIME_URL = './cactus.js';
 const WASM_URL = './cactus.wasm';
-const MODEL_URL = './tuned_needle3.cact';
+const MODEL_URL = './tuned_needle3_gpu.cact';
 
 // Checksums for integrity verification (SHA-256)
 const CHECKSUMS = {
   'cactus.js': 'bb61bcf0c48712bfb9cd0ade8f0748889dfde9944ac308220f42afbc605f82bc',
   'cactus.wasm': '4198b30795ded7739fe6c9e80bf26d5a844767c081574d40c8dc0487cde8b4b6',
-  'tuned_needle3.cact': 'b1090ff8f72df5120a86e52d8a8afb534bf5efb2656692c0da0a7913b609b060'
+  'tuned_needle3_gpu.cact': '4460a6deed695a283f38f11797ac7f61d2903fadf9a2ac4b1dda8464337c864c'
 };
 
 const CAPACITY = 1 << 18; // 262144 bytes for output buffer
@@ -170,7 +170,7 @@ async function loadModel() {
   log('=== loadModel START ===');
   self.postMessage({ type: 'progress', stage: 'fetching model' });
   log('fetching model...');
-  const modelResponse = await wrapError('fetching model', () => cachedFetch(MODEL_URL, CHECKSUMS['tuned_needle3.cact']));
+  const modelResponse = await wrapError('fetching model', () => cachedFetch(MODEL_URL, CHECKSUMS['tuned_needle3_gpu.cact']));
   log('model fetched successfully');
 
   self.postMessage({ type: 'progress', stage: 'reading model' });

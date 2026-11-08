@@ -253,7 +253,10 @@
       recognition.maxAlternatives = 1;
 
       recognition.onresult = (e) => {
-        const transcript = e.results[0][0].transcript;
+        let transcript = e.results[0][0].transcript;
+        // Fix: speech recognition outputs "+5" but model interprets "+" as negative
+        // Convert "+N" / "+ N" to "plus N" for correct model interpretation
+        transcript = transcript.replace(/^\+\s*(\d+)/, 'plus $1');
         micBtn.classList.remove('listening');
         micBtn.textContent = '🎤';
         sendToWorker(transcript);
