@@ -237,8 +237,13 @@
     }
 
     // --- Debug typed input ---
+    function preprocessTranscript(text) {
+      // Fix: model interprets "+N" as negative; convert to "plus N"
+      return text.replace(/^\+\s*(\d+)/, 'plus $1');
+    }
+
     debugBtn.onclick = () => {
-      const text = debugInput.value.trim();
+      const text = preprocessTranscript(debugInput.value.trim());
       if (text) { sendToWorker(text); debugInput.value = ''; }
     };
     debugInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') debugBtn.click(); });
