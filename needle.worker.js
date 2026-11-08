@@ -235,11 +235,16 @@ async function complete(text, id) {
   if (!initialized) throw new Error('Needle not initialized');
 
   // Reset model state to ensure each command is independent (no conversation context)
-  await wrapError('cactus_reset', () => {
-    const code = engine._cactus_reset();
-    log(`  cactus_reset code: ${code}`);
-    if (code < 0) throw new Error('Reset failed');
-  });
+  try {
+    log('  Calling cactus_reset...');
+    const resetCode = engine._cactus_reset();
+    log(`  cactus_reset code: ${resetCode}`);
+    if (resetCode < 0) {
+      log(`  WARNING: cactus_reset returned ${resetCode}, continuing anyway`);
+    }
+  } catch (resetErr) {
+    log(`  WARNING: cactus_reset failed: ${resetErr.message}, continuing anyway`);
+  }
 
   // cactus_complete(text, 0, 0, 384, outputPtr, CAPACITY)
   await wrapError('cactus_complete', () => {
