@@ -243,6 +243,7 @@ async function loadModel() {
     const cache = await caches.open(CACHE_NAME);
     await cache.put(MODEL_URL, modelResponse.clone());
     log(`  cached: ${MODEL_URL}`);
+    self.postMessage({ type: 'progress', stage: 'cached', url: MODEL_URL, size: combined.length });
 
     return modelResponse;
   });
