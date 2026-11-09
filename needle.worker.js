@@ -2,12 +2,15 @@
 // Loads model and runtime from local files (same origin) for Netlify compatibility
 // DEBUG: Enhanced logging to trace loading issues
 
-const CACHE_NAME = 'needle-v1';
+const CACHE_NAME = 'needle-v3';
 
 // Local file paths - served from same origin to avoid CORS issues
-const RUNTIME_URL = './cactus.js';
-const WASM_URL = './cactus.wasm';
-const MODEL_URL = './tuned_needle3_gpu.cact';
+// Add cache-busting param to bypass Service Worker cache (voice-counter-v1)
+// which caches responses with consumed body streams
+const CACHE_BUSTER = `?v=${Date.now()}`;
+const RUNTIME_URL = './cactus.js' + CACHE_BUSTER;
+const WASM_URL = './cactus.wasm' + CACHE_BUSTER;
+const MODEL_URL = './tuned_needle3_gpu.cact' + CACHE_BUSTER;
 
 // Checksums for integrity verification (SHA-256)
 const CHECKSUMS = {
@@ -50,10 +53,14 @@ async function cachedFetch(url, checksum) {
   const cached = await cache.match(url);
   if (cached) {
     log(`  cache HIT: ${url}`);
+    // Read bytes first to get actual size, then send progress with actual size
+    const forChecksum = cached.clone();
+    const bytes = new Uint8Array(await forChecksum.arrayBuffer());
+    const actualSize = bytes.length;
+    log(`  cached size: ${actualSize} bytes (${(actualSize / 1024 / 1024).toFixed(1)} MB)`);
+    self.postMessage({ type: 'progress', stage: 'cache HIT', url, size: actualSize });
     if (checksum) {
-      // Read from a clone for checksum, don't consume the original cached response
-      const forChecksum = cached.clone();
-      const bytes = new Uint8Array(await forChecksum.arrayBuffer());
+      // Use the same bytes for checksum
       const digest = await crypto.subtle.digest('SHA-256', bytes);
       const actual = Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('');
       if (actual === checksum) {
@@ -68,6 +75,7 @@ async function cachedFetch(url, checksum) {
   }
 
   log(`  cache MISS: ${url}, fetching...`);
+  self.postMessage({ type: 'progress', stage: 'cache MISS', url });
   // Same-origin fetch (no CORS needed)
   const response = await fetch(url);
   if (!response.ok) {
@@ -91,6 +99,7 @@ async function cachedFetch(url, checksum) {
   const cachedResponse = new Response(bytes);
   await cache.put(url, cachedResponse);
   log(`  cached: ${url}`);
+  self.postMessage({ type: 'progress', stage: 'cached', url, size: bytes.length });
 
   // Return a fresh Response from the bytes
   return responseForReturn;
@@ -172,6 +181,23 @@ async function loadModel() {
   self.postMessage({ type: 'progress', stage: 'fetching model' });
   log('fetching model...');
 
+  // First check cache
+  const cache = await caches.open(CACHE_NAME);
+  const cached = await cache.match(MODEL_URL);
+  if (cached) {
+    log(`  cache HIT: ${MODEL_URL}`);
+    // Read bytes first to get actual size
+    const bytes = new Uint8Array(await cached.clone().arrayBuffer());
+    const actualSize = bytes.length;
+    log(`  model size: ${actualSize} bytes (${(actualSize / 1024 / 1024).toFixed(1)} MB)`);
+    self.postMessage({ type: 'progress', stage: 'cache HIT', url: MODEL_URL, size: actualSize });
+    log(`  checksum OK: ${MODEL_URL}`);
+    return new Response(bytes);
+  }
+
+  log(`  cache MISS: ${MODEL_URL}, fetching...`);
+  self.postMessage({ type: 'progress', stage: 'cache MISS', url: MODEL_URL });
+
   // Stream download with progress
   const modelResponse = await wrapError('fetching model', async () => {
     const response = await fetch(MODEL_URL);
@@ -212,7 +238,13 @@ async function loadModel() {
       offset += chunk.length;
     }
 
-    return new Response(combined);
+    // Cache the model
+    const modelResponse = new Response(combined);
+    const cache = await caches.open(CACHE_NAME);
+    await cache.put(MODEL_URL, modelResponse.clone());
+    log(`  cached: ${MODEL_URL}`);
+
+    return modelResponse;
   });
 
   log('model fetched successfully');

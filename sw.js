@@ -1,4 +1,4 @@
-const CACHE_NAME = 'voice-counter-v1';
+const CACHE_NAME = 'voice-counter-v3';
 const ASSETS = [
   './',
   './index.html',
@@ -8,7 +8,7 @@ const ASSETS = [
   './needle.worker.js',
   './cactus.js',
   './cactus.wasm',
-  './needle3.cact'
+  './tuned_needle3_gpu.cact'
 ];
 
 self.addEventListener('install', (e) => {
@@ -40,9 +40,12 @@ self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
   if (url.origin !== location.origin) return;
   e.respondWith(
-    caches.match(e.request).then((cached) => cached || fetch(e.request).catch((err) => {
-      console.warn('Fetch failed:', e.request.url, err);
-      return new Response('Offline', { status: 503 });
-    }))
+    caches.match(e.request).then((cached) => {
+      if (cached) return cached.clone(); // Clone to allow multiple reads
+      return fetch(e.request).catch((err) => {
+        console.warn('Fetch failed:', e.request.url, err);
+        return new Response('Offline', { status: 503 });
+      });
+    })
   );
 });
