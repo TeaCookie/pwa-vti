@@ -43,53 +43,20 @@
     .raw-output { font-family: monospace; font-size: 0.75rem; color: #94a3b8; white-space: pre-wrap; word-break: break-word; max-width: 400px; text-align: left; }
     .install-hint { position: fixed; bottom: 1rem; left: 50%; transform: translateX(-50%); background: #1e293b; color: white; padding: 0.75rem 1.5rem; border-radius: 0.5rem; font-size: 0.875rem; opacity: 0; transition: opacity 0.3s; pointer-events: none; }
     .install-hint.show { opacity: 1; }
+    /* Model load status line */
+    .model-load-status {
+      font-size: 0.75rem; color: #475569;
+      text-align: center; width: 100%; max-width: 400px;
+      font-family: monospace; margin: 0.5rem 0;
+    }
+    .model-load-status.downloading { color: #2563eb; }
+    .model-load-status.loaded { color: #059669; }
     /* Debug log panel */
     .debug-panel { width: 100%; max-width: 600px; background: #1e293b; color: #e2e8f0; padding: 0.5rem; border-radius: 0.5rem; font-family: monospace; font-size: 0.7rem; max-height: 200px; overflow-y: auto; }
     .debug-entry { padding: 0.1rem 0; border-bottom: 1px solid #334155; }
     .debug-entry.error { color: #f87171; }
     .debug-entry.progress { color: #60a5fa; }
     .debug-entry.debug { color: #a3e635; }
-    /* Progress bar styles */
-    .progress-container {
-      width: 100%; max-width: 400px;
-      background: #e2e8f0; border-radius: 0.25rem;
-      height: 0.5rem; overflow: hidden;
-      margin: 0.5rem 0;
-    }
-    .progress-bar {
-      height: 100%; width: 0%;
-      background: linear-gradient(90deg, #2563eb, #3b82f6);
-      transition: width 0.2s ease;
-    }
-    .progress-text {
-      font-size: 0.75rem; color: #475569;
-      text-align: right; margin-top: 0.25rem;
-      font-family: monospace;
-    }
-    .cache-status {
-      font-size: 0.75rem; color: #059669;
-      text-align: center; width: 100%; max-width: 400px;
-      font-family: monospace; margin: 0.25rem 0;
-    }
-    .cache-status.cached { color: #059669; }
-    .cache-status.downloading { color: #2563eb; }
-    .cache-status.warning { color: #d97706; }
-    /* Cache summary panel */
-    .cache-summary {
-      width: 100%; max-width: 400px;
-      background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 0.5rem;
-      padding: 0.5rem; margin: 0.5rem 0;
-      font-size: 0.75rem; font-family: monospace; color: #166534;
-    }
-    .cache-summary.hidden { display: none; }
-    .cache-summary-item {
-      display: flex; justify-content: space-between; padding: 0.125rem 0;
-      border-bottom: 1px solid #dcfce7;
-    }
-    .cache-summary-item:last-child { border-bottom: none; }
-    .cache-summary-total {
-      font-weight: 600; color: #15803d;
-    }
   </style>
 </head>
 <body>
@@ -106,19 +73,7 @@
     <button id="debugBtn" disabled>Run</button>
   </div>
   <div class="status" id="status">Loading Needle…</div>
-  <div class="progress-container" id="progressContainer" style="display: none;">
-    <div class="progress-bar" id="progressBar"></div>
-    <div class="progress-text" id="progressText"></div>
-  </div>
-  <div class="cache-status" id="cacheStatus" style="display: none;"></div>
-  <div class="cache-summary hidden" id="cacheSummary">
-    <div style="font-weight: 600; margin-bottom: 0.25rem;">Cache Status</div>
-    <div id="cacheSummaryItems"></div>
-    <div class="cache-summary-item cache-summary-total">
-      <span>Total Cached</span>
-      <span id="cacheTotalSize">0 MB</span>
-    </div>
-  </div>
+  <div class="model-load-status" id="modelLoadStatus">0 / 60.5 MB loaded</div>
   <div class="raw-output" id="rawOutput"></div>
   <div class="debug-panel" id="debugPanel"></div>
   <div class="install-hint" id="installHint">Install app for offline use</div>
@@ -217,7 +172,7 @@
         debugBtn.disabled = false;
         micBtn.title = 'Tap to speak';
         setStatus('Ready — tap mic or type a command');
-        addDebugEntry('Worker ready! UI unlocked.');
+        addDebugEntry('Worker ready! UI unlocked.', { loadedBytes: window.loadedBytes }, 'progress');
         return;
       }
       if (type === 'error') {
@@ -227,91 +182,104 @@
         return;
       }
       if (type === 'progress') {
-        const progressContainer = document.getElementById('progressContainer');
-        const progressBar = document.getElementById('progressBar');
-        const progressText = document.getElementById('progressText');
-        const cacheStatus = document.getElementById('cacheStatus');
-        const cacheSummary = document.getElementById('cacheSummary');
-        const cacheSummaryItems = document.getElementById('cacheSummaryItems');
-        const cacheTotalSize = document.getElementById('cacheTotalSize');
-
-        // Track cache state
-        if (!window.cacheState) {
-          window.cacheState = { files: {}, totalBytes: 0 };
-        }
-        const cacheState = window.cacheState;
-
+        const modelLoadStatus = document.getElementById('modelLoadStatus');
         const stage = e.data.stage;
 
-        // Handle cache status
-        if (stage.startsWith('cache ')) {
-          cacheStatus.style.display = 'block';
-          cacheStatus.className = 'cache-status ' + (stage.includes('HIT') ? 'cached' : 'downloading');
-          if (stage.includes('HIT')) {
-            const sizeMB = e.data.size ? (e.data.size / 1024 / 1024).toFixed(1) : '?';
-            cacheStatus.textContent = `✓ Cached: ${stage} (${sizeMB} MB)`;
-            cacheStatus.classList.add('cached');
-            cacheStatus.classList.remove('downloading', 'warning');
-          } else {
-            cacheStatus.textContent = `⬇ ${stage}`;
-            cacheStatus.classList.add('downloading');
-            cacheStatus.classList.remove('cached', 'warning');
-          }
+        // Track loaded bytes and expected total dynamically
+        if (!window.loadedBytes) {
+          window.loadedBytes = 0;
+        }
+        if (!window.expectedSizes) {
+          window.expectedSizes = new Map(); // filename -> size
+        }
+        if (!window.expectedTotalBytes) {
+          window.expectedTotalBytes = 0;
+        }
 
-          // Track cache state for summary
-          const filename = e.data.url || stage.replace('cache ', '').replace('HIT', '').replace('MISS', '').trim();
-          const sizeBytes = e.data.size || 0;
-          if (stage.includes('HIT')) {
-            cacheState.files[filename] = { size: sizeBytes, status: 'cached' };
-          } else {
-            cacheState.files[filename] = { size: 0, status: 'downloading' };
+        // Normalize filename by stripping cache buster (?v=...)
+        function normalizeFilename(url) {
+          if (!url) return 'unknown';
+          return url.split('?')[0].split('/').pop();
+        }
+
+        function updateExpectedTotal(sizeBytes, url) {
+          const filename = normalizeFilename(url);
+          if (sizeBytes > 0 && !window.expectedSizes.has(filename)) {
+            window.expectedSizes.set(filename, sizeBytes);
+            window.expectedTotalBytes += sizeBytes;
           }
-          updateCacheSummary();
+        }
+
+        function getTotalMB() {
+          return (window.expectedTotalBytes / 1024 / 1024).toFixed(1);
+        }
+
+        // Debug: log every progress message
+        addDebugEntry(`Progress: ${stage}`, { size: e.data.size, loaded: e.data.loaded, total: e.data.total, url: e.data.url, loadedBytes: window.loadedBytes, expectedTotal: window.expectedTotalBytes }, 'progress');
+
+        // Handle cache HIT - accumulate loaded bytes and track expected size
+        if (stage.startsWith('cache HIT') || stage === 'cache HIT') {
+          const sizeBytes = e.data.size || 0;
+          const filename = e.data.url || 'unknown';
+          updateExpectedTotal(sizeBytes, filename);
+          window.loadedBytes += sizeBytes;
+          const loadedMB = (window.loadedBytes / 1024 / 1024).toFixed(1);
+          modelLoadStatus.textContent = `${loadedMB} / ${getTotalMB()} MB loaded`;
+          modelLoadStatus.className = 'model-load-status loaded';
+          addDebugEntry(`Cache HIT handled, loadedBytes: ${window.loadedBytes}, expectedTotal: ${window.expectedTotalBytes}`, null, 'progress');
           return;
         }
 
-        // Handle model download progress
+        // Handle cache MISS - just note it but don't reset loaded bytes
+        if (stage.startsWith('cache MISS')) {
+          // Keep showing current loaded state
+          return;
+        }
+
+        // Handle model download progress - show model download vs model size
         if (stage === 'downloading model') {
-          progressContainer.style.display = 'block';
-          cacheStatus.style.display = 'none';
           const loaded = e.data.loaded || 0;
           const total = e.data.total || 0;
-          const pct = total > 0 ? ((loaded / total) * 100).toFixed(1) : 0;
           const loadedMB = (loaded / 1024 / 1024).toFixed(1);
           const totalMB = (total / 1024 / 1024).toFixed(1);
-          progressBar.style.width = pct + '%';
-          progressText.textContent = `${loadedMB} / ${totalMB} MB (${pct}%)`;
-          setStatus(`Downloading model ${loadedMB} / ${totalMB} MB (${pct}%)`);
+          // Update expected total with model size if not already tracked
+          if (total > 0) {
+            updateExpectedTotal(total, 'tuned_needle3_gpu.cact');
+          }
+          modelLoadStatus.textContent = `${loadedMB} / ${totalMB} MB downloading (${getTotalMB()} MB total)`;
+          modelLoadStatus.className = 'model-load-status downloading';
           return;
         }
 
-        // Handle model loaded from cache
+        // Handle model loaded from cache (fetching model with size)
         if (stage === 'fetching model' && e.data.size) {
-          // Model was loaded from cache (no download progress)
-          const sizeMB = (e.data.size / 1024 / 1024).toFixed(1);
-          cacheStatus.style.display = 'block';
-          cacheStatus.className = 'cache-status cached';
-          cacheStatus.textContent = `✓ Model loaded from cache (${sizeMB} MB)`;
-          // Update cache state for model
-          cacheState.files['tuned_needle3_gpu.cact'] = { size: e.data.size, status: 'cached' };
-          updateCacheSummary();
+          const sizeBytes = e.data.size;
+          updateExpectedTotal(sizeBytes, 'tuned_needle3_gpu.cact');
+          window.loadedBytes += sizeBytes;
+          const loadedMB = (window.loadedBytes / 1024 / 1024).toFixed(1);
+          modelLoadStatus.textContent = `${loadedMB} / ${getTotalMB()} MB loaded`;
+          modelLoadStatus.className = 'model-load-status loaded';
           return;
-        }
-
-        // Handle model loaded (no size info - might be from cache)
-        if (stage === 'reading model' || stage === 'loading model') {
-          progressContainer.style.display = 'none';
-          cacheStatus.style.display = 'none';
         }
 
         // Handle file cached notification
         if (stage === 'cached') {
-          const filename = e.data.url;
           const sizeBytes = e.data.size || 0;
-          if (filename) {
-            cacheState.files[filename] = { size: sizeBytes, status: 'cached' };
-            updateCacheSummary();
-          }
+          const filename = e.data.url || 'unknown';
+          updateExpectedTotal(sizeBytes, filename);
+          window.loadedBytes += sizeBytes;
+          const loadedMB = (window.loadedBytes / 1024 / 1024).toFixed(1);
+          modelLoadStatus.textContent = `${loadedMB} / ${getTotalMB()} MB loaded`;
+          modelLoadStatus.className = 'model-load-status loaded';
+          return;
+        }
+
+        // Handle model loading stages
+        if (stage === 'reading model' || stage === 'loading model' || stage === 'initializing model') {
+          // Keep showing the loaded state with dynamic total
+          const loadedMB = (window.loadedBytes / 1024 / 1024).toFixed(1);
+          modelLoadStatus.textContent = `${loadedMB} / ${getTotalMB()} MB loaded`;
+          modelLoadStatus.className = 'model-load-status loaded';
           return;
         }
 
@@ -321,42 +289,7 @@
           stageMsg += ` (${(e.data.size/1024/1024).toFixed(1)} MB)`;
         }
         setStatus(stageMsg);
-        progressContainer.style.display = 'none';
-        cacheStatus.style.display = 'none';
         addDebugEntry(stageMsg, null, 'progress');
-      }
-
-      function updateCacheSummary() {
-        const cacheSummary = document.getElementById('cacheSummary');
-        const cacheSummaryItems = document.getElementById('cacheSummaryItems');
-        const cacheTotalSize = document.getElementById('cacheTotalSize');
-        const cacheState = window.cacheState;
-
-        if (!cacheSummary || !cacheSummaryItems || !cacheTotalSize) return;
-
-        let totalBytes = 0;
-        let html = '';
-
-        for (const [filename, info] of Object.entries(cacheState.files)) {
-          const sizeMB = info.size > 0 ? (info.size / 1024 / 1024).toFixed(1) : '?';
-          const statusIcon = info.status === 'cached' ? '✓' : '⬇';
-          const statusClass = info.status === 'cached' ? 'cached' : 'downloading';
-          html += `<div class="cache-summary-item">
-            <span>${statusIcon} ${filename}</span>
-            <span class="${statusClass}">${sizeMB} MB</span>
-          </div>`;
-          if (info.status === 'cached') {
-            totalBytes += info.size;
-          }
-        }
-
-        cacheSummaryItems.innerHTML = html;
-        cacheTotalSize.textContent = (totalBytes / 1024 / 1024).toFixed(1) + ' MB';
-
-        // Show summary if we have any cached files
-        if (Object.keys(cacheState.files).length > 0) {
-          cacheSummary.classList.remove('hidden');
-        }
       }
       if (type === 'loaded') {
         addDebugEntry('Sending init message to worker...');
