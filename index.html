@@ -173,7 +173,14 @@
         return;
       }
       if (type === 'progress') {
-        const stageMsg = 'Loading: ' + e.data.stage + (e.data.size ? ` (${(e.data.size/1024/1024).toFixed(1)} MB)` : '');
+        let stageMsg = 'Loading: ' + e.data.stage;
+        if (e.data.loaded !== undefined && e.data.total !== undefined) {
+          // Download progress with bytes
+          const pct = e.data.total > 0 ? ((e.data.loaded / e.data.total) * 100).toFixed(1) : '0';
+          stageMsg += ` ${(e.data.loaded/1024/1024).toFixed(1)} / ${(e.data.total/1024/1024).toFixed(1)} MB (${pct}%)`;
+        } else if (e.data.size !== undefined) {
+          stageMsg += ` (${(e.data.size/1024/1024).toFixed(1)} MB)`;
+        }
         setStatus(stageMsg);
         addDebugEntry(stageMsg, null, 'progress');
         return;

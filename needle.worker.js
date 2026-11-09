@@ -50,19 +50,20 @@ async function cachedFetch(url, checksum) {
   const cached = await cache.match(url);
   if (cached) {
     log(`  cache HIT: ${url}`);
-    const cloned = cached.clone();
     if (checksum) {
-      const bytes = new Uint8Array(await cloned.arrayBuffer());
+      // Read from a clone for checksum, don't consume the original cached response
+      const forChecksum = cached.clone();
+      const bytes = new Uint8Array(await forChecksum.arrayBuffer());
       const digest = await crypto.subtle.digest('SHA-256', bytes);
       const actual = Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('');
       if (actual === checksum) {
         log(`  checksum OK: ${url}`);
-        return cloned;
+        return cached.clone(); // Return a fresh clone for the caller
       }
       log(`  checksum MISMATCH: ${url} (expected ${checksum}, got ${actual})`);
       // Checksum mismatch - fall through to re-fetch
     } else {
-      return cloned;
+      return cached.clone(); // Return a fresh clone
     }
   }
 
@@ -170,7 +171,50 @@ async function loadModel() {
   log('=== loadModel START ===');
   self.postMessage({ type: 'progress', stage: 'fetching model' });
   log('fetching model...');
-  const modelResponse = await wrapError('fetching model', () => cachedFetch(MODEL_URL, CHECKSUMS['tuned_needle3_gpu.cact']));
+
+  // Stream download with progress
+  const modelResponse = await wrapError('fetching model', async () => {
+    const response = await fetch(MODEL_URL);
+    if (!response.ok) {
+      throw new Error(`Download failed (${response.status}): ${response.statusText} - ${MODEL_URL}`);
+    }
+
+    const totalSize = parseInt(response.headers.get('Content-Length') || '0', 10);
+    log(`  model size: ${totalSize} bytes (${(totalSize / 1024 / 1024).toFixed(1)} MB)`);
+
+    // Send initial progress with total size
+    self.postMessage({ type: 'progress', stage: 'downloading model', loaded: 0, total: totalSize });
+
+    const reader = response.body.getReader();
+    const chunks = [];
+    let loaded = 0;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      chunks.push(value);
+      loaded += value.length;
+
+      // Send progress update (throttle to avoid flooding)
+      if (loaded % (1024 * 1024) < value.length) { // Update roughly every 1MB
+        self.postMessage({ type: 'progress', stage: 'downloading model', loaded, total: totalSize });
+      }
+    }
+
+    log(`  downloaded ${loaded} bytes`);
+
+    // Combine all chunks into a single Uint8Array
+    const combined = new Uint8Array(loaded);
+    let offset = 0;
+    for (const chunk of chunks) {
+      combined.set(chunk, offset);
+      offset += chunk.length;
+    }
+
+    return new Response(combined);
+  });
+
   log('model fetched successfully');
 
   self.postMessage({ type: 'progress', stage: 'reading model' });
