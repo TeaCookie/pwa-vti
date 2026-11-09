@@ -2,18 +2,21 @@
 // Loads model and runtime from local files (same origin) for Netlify compatibility
 // DEBUG: Enhanced logging to trace loading issues
 
-const CACHE_NAME = 'needle-v1';
+const CACHE_NAME = 'needle-v3';
 
 // Local file paths - served from same origin to avoid CORS issues
-const RUNTIME_URL = './cactus.js';
-const WASM_URL = './cactus.wasm';
-const MODEL_URL = './needle3.cact';
+// Add cache-busting param to bypass Service Worker cache (voice-counter-v1)
+// which caches responses with consumed body streams
+const CACHE_BUSTER = `?v=${Date.now()}`;
+const RUNTIME_URL = './cactus.js' + CACHE_BUSTER;
+const WASM_URL = './cactus.wasm' + CACHE_BUSTER;
+const MODEL_URL = './tuned_needle3_gpu.cact' + CACHE_BUSTER;
 
 // Checksums for integrity verification (SHA-256)
 const CHECKSUMS = {
   'cactus.js': 'bb61bcf0c48712bfb9cd0ade8f0748889dfde9944ac308220f42afbc605f82bc',
   'cactus.wasm': '4198b30795ded7739fe6c9e80bf26d5a844767c081574d40c8dc0487cde8b4b6',
-  'needle3.cact': 'c9d915eca282ed42d1a09b143b592adb4cc6744ffe2d294adf5cfc5548170c38'
+  'tuned_needle3_gpu.cact': '4460a6deed695a283f38f11797ac7f61d2903fadf9a2ac4b1dda8464337c864c'
 };
 
 const CAPACITY = 1 << 18; // 262144 bytes for output buffer
@@ -50,33 +53,36 @@ async function cachedFetch(url, checksum) {
   const cached = await cache.match(url);
   if (cached) {
     log(`  cache HIT: ${url}`);
-    const cloned = cached.clone();
+    // Read bytes first to get actual size, then send progress with actual size
+    const forChecksum = cached.clone();
+    const bytes = new Uint8Array(await forChecksum.arrayBuffer());
+    const actualSize = bytes.length;
+    log(`  cached size: ${actualSize} bytes (${(actualSize / 1024 / 1024).toFixed(1)} MB)`);
+    self.postMessage({ type: 'progress', stage: 'cache HIT', url, size: actualSize });
     if (checksum) {
-      const bytes = new Uint8Array(await cloned.arrayBuffer());
+      // Use the same bytes for checksum
       const digest = await crypto.subtle.digest('SHA-256', bytes);
       const actual = Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('');
       if (actual === checksum) {
         log(`  checksum OK: ${url}`);
-        return cloned;
+        return cached.clone(); // Return a fresh clone for the caller
       }
       log(`  checksum MISMATCH: ${url} (expected ${checksum}, got ${actual})`);
       // Checksum mismatch - fall through to re-fetch
     } else {
-      return cloned;
+      return cached.clone(); // Return a fresh clone
     }
   }
 
   log(`  cache MISS: ${url}, fetching...`);
+  self.postMessage({ type: 'progress', stage: 'cache MISS', url });
   // Same-origin fetch (no CORS needed)
   const response = await fetch(url);
   if (!response.ok) {
     throw new Error(`Download failed (${response.status}): ${response.statusText} - ${url}`);
   }
 
-  // Clone the response BEFORE reading it, so we can return a readable response
-  const responseForReturn = response.clone();
-
-  // Read the original response for checksum verification and caching
+  // Read the response body FIRST (consumes the stream)
   const bytes = new Uint8Array(await response.arrayBuffer());
   log(`  downloaded ${bytes.length} bytes from ${url}`);
 
@@ -87,11 +93,15 @@ async function cachedFetch(url, checksum) {
     log(`  checksum OK after download: ${url}`);
   }
 
+  // Create TWO new Response objects from the bytes - one for return, one for cache
+  // This avoids the "body stream already read" issue with cloned Responses
+  const responseForReturn = new Response(bytes.slice()); // slice() creates a copy
   const cachedResponse = new Response(bytes);
-  await cache.put(url, cachedResponse.clone());
+  await cache.put(url, cachedResponse);
   log(`  cached: ${url}`);
+  self.postMessage({ type: 'progress', stage: 'cached', url, size: bytes.length });
 
-  // Return the cloned original response (not yet read)
+  // Return a fresh Response from the bytes
   return responseForReturn;
 }
 
@@ -170,7 +180,73 @@ async function loadModel() {
   log('=== loadModel START ===');
   self.postMessage({ type: 'progress', stage: 'fetching model' });
   log('fetching model...');
-  const modelResponse = await wrapError('fetching model', () => cachedFetch(MODEL_URL, CHECKSUMS['needle3.cact']));
+
+  // First check cache
+  const cache = await caches.open(CACHE_NAME);
+  const cached = await cache.match(MODEL_URL);
+  if (cached) {
+    log(`  cache HIT: ${MODEL_URL}`);
+    // Read bytes first to get actual size
+    const bytes = new Uint8Array(await cached.clone().arrayBuffer());
+    const actualSize = bytes.length;
+    log(`  model size: ${actualSize} bytes (${(actualSize / 1024 / 1024).toFixed(1)} MB)`);
+    self.postMessage({ type: 'progress', stage: 'cache HIT', url: MODEL_URL, size: actualSize });
+    log(`  checksum OK: ${MODEL_URL}`);
+    return new Response(bytes);
+  }
+
+  log(`  cache MISS: ${MODEL_URL}, fetching...`);
+  self.postMessage({ type: 'progress', stage: 'cache MISS', url: MODEL_URL });
+
+  // Stream download with progress
+  const modelResponse = await wrapError('fetching model', async () => {
+    const response = await fetch(MODEL_URL);
+    if (!response.ok) {
+      throw new Error(`Download failed (${response.status}): ${response.statusText} - ${MODEL_URL}`);
+    }
+
+    const totalSize = parseInt(response.headers.get('Content-Length') || '0', 10);
+    log(`  model size: ${totalSize} bytes (${(totalSize / 1024 / 1024).toFixed(1)} MB)`);
+
+    // Send initial progress with total size
+    self.postMessage({ type: 'progress', stage: 'downloading model', loaded: 0, total: totalSize });
+
+    const reader = response.body.getReader();
+    const chunks = [];
+    let loaded = 0;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      chunks.push(value);
+      loaded += value.length;
+
+      // Send progress update (throttle to avoid flooding)
+      if (loaded % (1024 * 1024) < value.length) { // Update roughly every 1MB
+        self.postMessage({ type: 'progress', stage: 'downloading model', loaded, total: totalSize });
+      }
+    }
+
+    log(`  downloaded ${loaded} bytes`);
+
+    // Combine all chunks into a single Uint8Array
+    const combined = new Uint8Array(loaded);
+    let offset = 0;
+    for (const chunk of chunks) {
+      combined.set(chunk, offset);
+      offset += chunk.length;
+    }
+
+    // Cache the model
+    const modelResponse = new Response(combined);
+    const cache = await caches.open(CACHE_NAME);
+    await cache.put(MODEL_URL, modelResponse.clone());
+    log(`  cached: ${MODEL_URL}`);
+
+    return modelResponse;
+  });
+
   log('model fetched successfully');
 
   self.postMessage({ type: 'progress', stage: 'reading model' });
@@ -233,6 +309,18 @@ async function initializeNeedle(tools) {
 async function complete(text, id) {
   log(`=== complete START: "${text}" (id: ${id}) ===`);
   if (!initialized) throw new Error('Needle not initialized');
+
+  // Reset model state to ensure each command is independent (no conversation context)
+  try {
+    log('  Calling cactus_reset...');
+    const resetCode = engine._cactus_reset();
+    log(`  cactus_reset code: ${resetCode}`);
+    if (resetCode < 0) {
+      log(`  WARNING: cactus_reset returned ${resetCode}, continuing anyway`);
+    }
+  } catch (resetErr) {
+    log(`  WARNING: cactus_reset failed: ${resetErr.message}, continuing anyway`);
+  }
 
   // cactus_complete(text, 0, 0, 384, outputPtr, CAPACITY)
   await wrapError('cactus_complete', () => {
