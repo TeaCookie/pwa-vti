@@ -1,0 +1,51 @@
+[
+  {
+    "name": "increment",
+    "description": "Increase the counter by a positive amount. Use for: add, plus, increase, more, higher, count up.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "amount": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Positive amount to increase the counter by (e.g., 1, 5, 100)"
+        }
+      },
+      "required": ["amount"]
+    },
+    "triggers": [
+      "^(?!.*\\b(and|then|also)\\b).*\\b(add|plus|increase|more|higher|count up)\\b.*\\d+",
+      "^\\+\\s*\\d+"
+    ]
+  },
+  {
+    "name": "decrement",
+    "description": "Decrease the counter by a positive amount. Use for: subtract, minus, decrease, less, lower, reduce, take away.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "amount": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Positive amount to decrease the counter by (e.g., 1, 5, 100). The tool internally applies the negative sign."
+        }
+      },
+      "required": ["amount"]
+    },
+    "triggers": [
+      "^(?!.*\\b(and|then|also)\\b).*\\b(subtract|minus|decrease|less|lower|reduce|take away)\\b.*\\d+",
+      "^\\-\\s*\\d+"
+    ]
+  },
+  {
+    "name": "reset",
+    "description": "Reset the counter to zero.",
+    "parameters": {
+      "type": "object",
+      "properties": {}
+    },
+    "triggers": [
+      "^(?!.*\\b(and|then|also)\\b).*\\b(reset|zero|clear|start over|go back to zero)\\b"
+    ]
+  }
+]
