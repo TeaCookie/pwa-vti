@@ -124,24 +124,41 @@
     // Tool schemas for Needle (matching CactusCompute demo format)
     const tools = [
       {
-        name: 'modify',
-        description: 'Change the counter by a positive or negative amount. Use positive numbers to add to the counter, negative numbers to subtract from the counter.',
+        name: 'increment',
+        description: 'Increase the counter by a positive amount. Use for: add, plus, increase, more, higher, count up.',
         parameters: {
           type: 'object',
           properties: {
             amount: {
-              type: 'number',
-              description: 'The amount to change the counter by. Positive numbers increase the counter (e.g., 5, +3). Negative numbers decrease the counter (e.g., -5, -3). Can be any integer.'
+              type: 'integer',
+              minimum: 1,
+              description: 'Positive amount to increase the counter by (e.g., 1, 5, 100)'
             }
           },
           required: ['amount']
         },
         triggers: [
           "^(?!.*\\b(and|then|also)\\b).*\\b(add|plus|increase|more|higher|count up)\\b.*\\d+",
-          "^(?!.*\\b(and|then|also)\\b).*\\b(subtract|minus|decrease|less|lower|reduce|take away)\\b.*\\d+",
-          "^(?!.*\\b(and|then|also)\\b).*[+-]\\s*\\d+",
-          "^\\-\\s*\\d+",
           "^\\+\\s*\\d+"
+        ]
+      },
+      {
+        name: 'decrement',
+        description: 'Decrease the counter by a positive amount. Use for: subtract, minus, decrease, less, lower, reduce, take away.',
+        parameters: {
+          type: 'object',
+          properties: {
+            amount: {
+              type: 'integer',
+              minimum: 1,
+              description: 'Positive amount to decrease the counter by (e.g., 1, 5, 100). The tool internally applies the negative sign.'
+            }
+          },
+          required: ['amount']
+        },
+        triggers: [
+          "^(?!.*\\b(and|then|also)\\b).*\\b(subtract|minus|decrease|less|lower|reduce|take away)\\b.*\\d+",
+          "^\\-\\s*\\d+"
         ]
       },
       {
@@ -153,7 +170,7 @@
           required: []
         },
         triggers: [
-          "^(?!.*\\b(and|then|also)\\b).*\\b(reset|zero|clear)\\b"
+          "^(?!.*\\b(and|then|also)\\b).*\\b(reset|zero|clear|start over|go back to zero)\\b"
         ]
       }
     ];
@@ -343,7 +360,8 @@
     function handleCommand(name, args) {
       const amount = typeof args.amount === 'number' ? args.amount : 1;
       switch (name) {
-        case 'modify': count += amount; break;
+        case 'increment': count += amount; break;
+        case 'decrement': count -= amount; break;
         case 'reset': count = 0; break;
       }
       save(); render();

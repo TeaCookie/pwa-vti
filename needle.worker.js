@@ -16,7 +16,7 @@ const MODEL_URL = './tuned_needle3_gpu.cact' + CACHE_BUSTER;
 const CHECKSUMS = {
   'cactus.js': 'bb61bcf0c48712bfb9cd0ade8f0748889dfde9944ac308220f42afbc605f82bc',
   'cactus.wasm': '4198b30795ded7739fe6c9e80bf26d5a844767c081574d40c8dc0487cde8b4b6',
-  'tuned_needle3_gpu.cact': '4460a6deed695a283f38f11797ac7f61d2903fadf9a2ac4b1dda8464337c864c'
+  'tuned_needle3_gpu.cact': 'fea176d1f49b2c58473dc4396e35086f5a659113543eb4fbe63fa6260b26795e'
 };
 
 const CAPACITY = 1 << 18; // 262144 bytes for output buffer
