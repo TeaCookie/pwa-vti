@@ -2,8 +2,11 @@
 .git/
 .claude/
 models/
+training/
+docs/
+checkpoints/
 *.md
-download-models.js
-netlify.toml
+app/download-models.js
+app/netlify.toml
 .gitignore
 .netlifyignore
