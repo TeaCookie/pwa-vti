@@ -8,5 +8,6 @@ checkpoints/
 *.md
 app/download-models.js
 app/netlify.toml
+netlify.toml
 .gitignore
 .netlifyignore
